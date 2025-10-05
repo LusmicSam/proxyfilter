@@ -53,7 +53,7 @@ app.get('/filter', async (req, res) => {
             responseType: 'arraybuffer',
             timeout: 15000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                 'Referer': 'https://www.aliexpress.com/',
                 'Accept': 'image/webp,image/apng,image/*,*/*'
             }
@@ -67,6 +67,8 @@ app.get('/filter', async (req, res) => {
         console.log('Checking with NSFW API...');
         let isSafe = false;
         let nsfwCategory = 'unknown';
+        let finalDecision = 'Unknown';
+        let confidence = 0.0;
 
         try {
             const formData = new FormData();
@@ -87,11 +89,15 @@ app.get('/filter', async (req, res) => {
             // 🔥 Debug log the full NSFW API response
             console.log('NSFW API Response:', nsfwResponse.data);
 
-            // Safe parsing
-            nsfwCategory = nsfwResponse.data?.ensemble_category || 'unknown';
-            isSafe = nsfwCategory === 'male_only';
+            // Use `final_decision` from API
+            finalDecision = nsfwResponse.data?.final_decision || 'Unknown';
+            confidence = nsfwResponse.data?.confidence || 0.0;
+            nsfwCategory = nsfwResponse.data?.category || 'N/A';
 
-            console.log(`NSFW Result: ${nsfwCategory}, Safe: ${isSafe}`);
+            // The new logic:
+            isSafe = finalDecision === 'Safe';
+
+            console.log(`🧠 NSFW Result -> Final Decision: ${finalDecision}, Confidence: ${confidence}, Safe: ${isSafe}`);
         } catch (nsfwError) {
             console.log('⚠️ NSFW API failed, defaulting to blur:', nsfwError.message);
             isSafe = false;
@@ -103,10 +109,11 @@ app.get('/filter', async (req, res) => {
             console.log('✅ Returning original safe image');
             res.setHeader('Content-Type', originalContentType);
             res.setHeader('X-NSFW-Status', 'safe');
-            res.setHeader('X-NSFW-Category', nsfwCategory || 'unknown');
+            res.setHeader('X-NSFW-Decision', finalDecision);
+            res.setHeader('X-NSFW-Confidence', confidence);
             res.send(imageBuffer);
         } else {
-            console.log('⚠️ Applying blur to unsafe image');
+            console.log('⚠️ Applying blur to UNSAFE image (final_decision ≠ Safe)');
             const blurredImage = await sharp(imageBuffer)
                 .blur(20)
                 .png()
@@ -114,7 +121,8 @@ app.get('/filter', async (req, res) => {
 
             res.setHeader('Content-Type', 'image/png');
             res.setHeader('X-NSFW-Status', 'blurred');
-            res.setHeader('X-NSFW-Category', nsfwCategory || 'unknown');
+            res.setHeader('X-NSFW-Decision', finalDecision);
+            res.setHeader('X-NSFW-Confidence', confidence);
             res.send(blurredImage);
         }
 
@@ -142,7 +150,7 @@ app.get('/proxy', async (req, res) => {
             responseType: 'arraybuffer',
             timeout: 10000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                 'Referer': 'https://www.aliexpress.com/'
             }
         });
