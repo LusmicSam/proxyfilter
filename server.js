@@ -16,11 +16,10 @@ const CONFIG = {
     PORT: process.env.PORT || 3000
 };
 
-// Utility function to decode URLs
+// ==================== UTIL: URL DECODER ====================
 function decodeImageUrl(encodedUrl) {
     try {
         let decoded = encodedUrl;
-        // Keep decoding until no more encoded characters
         while (decoded.includes('%') && decoded !== decodeURIComponent(decoded)) {
             decoded = decodeURIComponent(decoded);
         }
@@ -32,23 +31,21 @@ function decodeImageUrl(encodedUrl) {
 }
 
 // ==================== MAIN SMART FILTER ENDPOINT ====================
-// This is the ONLY endpoint you need - it takes encoded image URL and returns safe/blurred image
 app.get('/filter', async (req, res) => {
     try {
         const encodedImageUrl = req.query.url;
-        
-        console.log('=== STARTING SMART FILTER ===');
+        console.log('\n=== STARTING SMART FILTER ===');
         console.log('Received encoded URL:', encodedImageUrl);
-        
+
         if (!encodedImageUrl) {
             return res.status(400).json({ error: 'Missing image URL' });
         }
 
-        // Step 1: Decode the image URL
+        // Step 1: Decode URL
         const actualImageUrl = decodeImageUrl(encodedImageUrl);
         console.log('Decoded URL:', actualImageUrl);
 
-        // Step 2: Download the original image
+        // Step 2: Download image
         console.log('Downloading image...');
         const imageResponse = await axios({
             method: 'GET',
@@ -62,16 +59,15 @@ app.get('/filter', async (req, res) => {
             }
         });
 
-        console.log('Image downloaded, size:', imageResponse.data.length, 'bytes');
-
         const imageBuffer = Buffer.from(imageResponse.data);
         const originalContentType = imageResponse.headers['content-type'] || 'image/jpeg';
+        console.log('✅ Image downloaded, size:', imageBuffer.length, 'bytes');
 
         // Step 3: Check with NSFW API
         console.log('Checking with NSFW API...');
         let isSafe = false;
         let nsfwCategory = 'unknown';
-        
+
         try {
             const formData = new FormData();
             formData.append('file', imageBuffer, {
@@ -88,57 +84,58 @@ app.get('/filter', async (req, res) => {
                 }
             );
 
-            nsfwCategory = nsfwResponse.data.ensemble_category;
-            isSafe = nsfwCategory === 'male_only';
-            
-            console.log(`NSFW Result: ${nsfwCategory}, Safe: ${isSafe}`);
+            // 🔥 Debug log the full NSFW API response
+            console.log('NSFW API Response:', nsfwResponse.data);
 
+            // Safe parsing
+            nsfwCategory = nsfwResponse.data?.ensemble_category || 'unknown';
+            isSafe = nsfwCategory === 'male_only';
+
+            console.log(`NSFW Result: ${nsfwCategory}, Safe: ${isSafe}`);
         } catch (nsfwError) {
-            console.log('NSFW API failed, defaulting to blur:', nsfwError.message);
-            // If NSFW API fails, blur for safety
+            console.log('⚠️ NSFW API failed, defaulting to blur:', nsfwError.message);
             isSafe = false;
             nsfwCategory = 'api_error';
         }
 
         // Step 4: Return appropriate image
         if (isSafe) {
-            console.log('Returning original safe image');
+            console.log('✅ Returning original safe image');
             res.setHeader('Content-Type', originalContentType);
             res.setHeader('X-NSFW-Status', 'safe');
-            res.setHeader('X-NSFW-Category', nsfwCategory);
+            res.setHeader('X-NSFW-Category', nsfwCategory || 'unknown');
             res.send(imageBuffer);
         } else {
-            console.log('Applying blur to unsafe image');
+            console.log('⚠️ Applying blur to unsafe image');
             const blurredImage = await sharp(imageBuffer)
-                .blur(20) // Adjust blur strength as needed
+                .blur(20)
                 .png()
                 .toBuffer();
-            
+
             res.setHeader('Content-Type', 'image/png');
             res.setHeader('X-NSFW-Status', 'blurred');
-            res.setHeader('X-NSFW-Category', nsfwCategory);
+            res.setHeader('X-NSFW-Category', nsfwCategory || 'unknown');
             res.send(blurredImage);
         }
 
-        console.log('=== FILTERING COMPLETE ===');
-
+        console.log('=== FILTERING COMPLETE ===\n');
     } catch (error) {
-        console.error('FATAL ERROR:', error.message);
-        res.status(500).json({ 
+        console.error('❌ FATAL ERROR:', error.message);
+        res.status(500).json({
             error: 'Filter failed',
             message: error.message
         });
     }
 });
 
-// ==================== SIMPLE IMAGE PROXY (Fallback) ====================
+// ==================== SIMPLE IMAGE PROXY ====================
 app.get('/proxy', async (req, res) => {
     try {
         const encodedUrl = req.query.url;
         const decodedUrl = decodeImageUrl(encodedUrl);
-        
+
         console.log('Proxying image:', decodedUrl);
-        
+
         const response = await axios({
             method: 'GET',
             url: decodedUrl,
@@ -153,7 +150,6 @@ app.get('/proxy', async (req, res) => {
         const contentType = response.headers['content-type'] || 'image/jpeg';
         res.setHeader('Content-Type', contentType);
         res.send(Buffer.from(response.data));
-        
     } catch (error) {
         console.error('Proxy error:', error.message);
         res.status(500).json({ error: 'Proxy failed' });
@@ -162,8 +158,8 @@ app.get('/proxy', async (req, res) => {
 
 // ==================== HEALTH CHECK ====================
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
+    res.json({
+        status: 'OK',
         service: 'Smart Image Filter',
         timestamp: new Date().toISOString()
     });
@@ -171,15 +167,13 @@ app.get('/health', (req, res) => {
 
 // ==================== TEST ENDPOINT ====================
 app.get('/test', (req, res) => {
-    // Test with your specific AliExpress image
     const testUrl = 'https%3A%2F%2Fae01.alicdn.com%2Fkf%2FS48cec483fac04ff9b5d824a4760f021ff%2F48x48.png';
-    
     res.json({
         message: 'Smart Filter Server is running! 🚀',
         usage: {
             main: `GET /filter?url=ENCODED_IMAGE_URL`,
             example: `http://localhost:${CONFIG.PORT}/filter?url=${testUrl}`,
-            fallback: `GET /proxy?url=ENCODED_IMAGE_URL (no filtering)`
+            fallback: `GET /proxy?url=ENCODED_IMAGE_URL`
         },
         test_links: {
             filtered: `/filter?url=${testUrl}`,
@@ -188,9 +182,9 @@ app.get('/test', (req, res) => {
     });
 });
 
-// Start server
+// ==================== START SERVER ====================
 app.listen(CONFIG.PORT, () => {
-    console.log(`🎯 Smart Filter Server running on port ${CONFIG.PORT}`);
+    console.log(`\n🎯 Smart Filter Server running on port ${CONFIG.PORT}`);
     console.log(`📍 Health: http://localhost:${CONFIG.PORT}/health`);
     console.log(`📍 Test: http://localhost:${CONFIG.PORT}/test`);
     console.log(`🚀 Main endpoint: GET /filter?url=ENCODED_IMAGE_URL`);
